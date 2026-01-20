@@ -1,0 +1,31 @@
+============================================================
+QUICK DEPLOY - COPY & PASTE THESE COMMANDS
+============================================================
+
+You're already logged in and linked! ✅
+
+Run these commands ONE BY ONE:
+
+1. Deploy the code:
+   
+   railway up --detach
+
+2. Wait 30 seconds for deployment, then import database:
+   
+   cat railway_export/database_export.sql | railway run sqlite3 data/inventory.db
+
+3. Verify it worked:
+   
+   railway run sqlite3 data/inventory.db "SELECT COUNT(*), SUM(quantity_sold) FROM transactions"
+
+   Should show: 1070|1544
+
+4. Get your URL:
+   
+   railway status
+
+5. Visit the URL, lock admin (🔓 → 🔒), done!
+
+============================================================
+PIN: 1453
+============================================================
