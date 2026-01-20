@@ -385,6 +385,32 @@ class InventoryHandler(BaseHTTPRequestHandler):
       .modal-btn-secondary:hover {
         background: #555;
       }
+      
+      /* Admin mode protection */
+      body.admin-disabled .admin-control,
+      body.admin-disabled .edit-qty-btn,
+      body.admin-disabled .assign-btn,
+      body.admin-disabled .delete-btn,
+      body.admin-disabled .nav-tab[onclick*="admin"],
+      body.admin-disabled button[onclick*="edit"],
+      body.admin-disabled button[onclick*="showEditImageModal"] {
+        display: none !important;
+      }
+      
+      .admin-lock-btn {
+        padding: 8px 16px;
+        background: #dc2626;
+        border: none;
+        color: white;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        margin-left: 10px;
+      }
+      .admin-lock-btn.unlocked {
+        background: #16a34a;
+      }
     </style>
   </head>
   <body>
@@ -423,6 +449,81 @@ class InventoryHandler(BaseHTTPRequestHandler):
       </div>
     </div>
     
+    <!-- Add Item Modal -->
+    <div id="addItemModal" class="modal">
+      <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">➕ Add New Item</div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="new-item-name">Item Name:</label>
+            <input type="text" id="new-item-name" class="form-input" placeholder="e.g., Phantasmal Flames Booster Pack">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="new-item-qty">Quantity:</label>
+            <input type="number" id="new-item-qty" class="form-input" min="0" value="1">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="new-item-cost">Unit Cost ($):</label>
+            <input type="number" id="new-item-cost" class="form-input" min="0" step="0.01" value="0.00">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="new-item-set">Set/Category:</label>
+            <input type="text" id="new-item-set" class="form-input" placeholder="e.g., Phantasmal Flames">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="new-item-image">Image URL (optional):</label>
+            <input type="text" id="new-item-image" class="form-input" placeholder="/path/to/image.jpg">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn modal-btn-secondary" onclick="closeAddItemModal()">Cancel</button>
+          <button class="modal-btn modal-btn-primary" onclick="confirmAddItem()">Add Item</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Edit Image Modal -->
+    <div id="editImageModal" class="modal">
+      <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">🖼️ Edit Image</div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Item:</label>
+            <div id="edit-image-item-name" style="color: #fff; font-weight: 500;"></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="edit-image-url">Image Path:</label>
+            <input type="text" id="edit-image-url" class="form-input" placeholder="/Users/.../image.jpg">
+            <div style="color: #888; font-size: 12px; margin-top: 5px;">Enter absolute path to image file</div>
+          </div>
+          <div class="form-group" id="edit-image-preview" style="display: none;">
+            <label class="form-label">Preview:</label>
+            <img id="edit-image-preview-img" style="max-width: 200px; border-radius: 6px; border: 1px solid #2a2a2a;">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn modal-btn-secondary" onclick="closeEditImageModal()">Cancel</button>
+          <button class="modal-btn modal-btn-primary" onclick="confirmEditImage()">Save Image</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Edit All Items Modal -->
+    <div id="editAllModal" class="modal">
+      <div class="modal-content" style="max-width: 1200px; max-height: 80vh; overflow-y: auto;">
+        <div class="modal-header">✏️ Edit All Items</div>
+        <div class="modal-body">
+          <input type="text" id="edit-all-search" class="form-input" placeholder="Search items..." style="margin-bottom: 15px;">
+          <div id="edit-all-items-list" style="max-height: 500px; overflow-y: auto;">
+            <!-- Items will be populated here -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-btn modal-btn-secondary" onclick="closeEditAllModal()">Close</button>
+        </div>
+      </div>
+    </div>
+    
     <div class="top-nav">
       <div class="nav-container">
         <div class="nav-title">Kanto Collect Inventory</div>
@@ -433,7 +534,11 @@ class InventoryHandler(BaseHTTPRequestHandler):
           <button class="nav-tab" onclick="switchView('nima')">Nima</button>
           <button class="nav-tab" onclick="switchView('kanto')">Kanto</button>
           <button class="nav-tab" onclick="switchView('unallocated')">Unallocated</button>
+          <button class="nav-tab admin-control" style="background: #1a4d2e; border-color: #2d7a4e;" onclick="switchView('admin')">⚙️ Admin</button>
         </div>
+        <button id="admin-lock-btn" class="admin-lock-btn unlocked" onclick="toggleAdminMode()">
+          🔓 Admin Enabled
+        </button>
       </div>
     </div>
     
@@ -495,9 +600,113 @@ class InventoryHandler(BaseHTTPRequestHandler):
           <div class="loading">Loading...</div>
         </div>
       </div>
+      
+      <!-- Admin Panel -->
+      <div id="view-admin" class="view-section">
+        <div style="margin-top: 20px;">
+          <h2 style="margin-bottom: 20px; font-size: 24px;">⚙️ Admin Controls</h2>
+          
+          <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
+            <!-- Add New Item -->
+            <div class="stat-card" style="cursor: pointer; border: 2px solid #2a4d3a;" onclick="showAddItemModal()">
+              <div style="font-size: 40px; text-align: center; margin-bottom: 10px;">➕</div>
+              <div style="font-weight: 600; font-size: 16px; text-align: center;">Add New Item</div>
+              <div style="color: #888; font-size: 13px; text-align: center; margin-top: 5px;">Create a new inventory entry</div>
+            </div>
+            
+            <!-- Bulk Image Upload -->
+            <div class="stat-card" style="cursor: pointer; border: 2px solid #3a4d6a;" onclick="showBulkImageModal()">
+              <div style="font-size: 40px; text-align: center; margin-bottom: 10px;">🖼️</div>
+              <div style="font-weight: 600; font-size: 16px; text-align: center;">Bulk Image Upload</div>
+              <div style="color: #888; font-size: 13px; text-align: center; margin-top: 5px;">Upload multiple product images</div>
+            </div>
+            
+            <!-- Edit All Items -->
+            <div class="stat-card" style="cursor: pointer; border: 2px solid #5a4d2a;" onclick="showEditAllModal()">
+              <div style="font-size: 40px; text-align: center; margin-bottom: 10px;">✏️</div>
+              <div style="font-weight: 600; font-size: 16px; text-align: center;">Edit All Items</div>
+              <div style="color: #888; font-size: 13px; text-align: center; margin-top: 5px;">View and edit any item</div>
+            </div>
+          </div>
+          
+          <div style="margin-top: 40px;">
+            <h3 style="margin-bottom: 15px; font-size: 18px;">🔧 Quick Actions</h3>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+              <button onclick="exportDatabase()" style="padding: 12px 20px; background: #2563eb; border: none; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">📦 Export Database</button>
+              <button onclick="refreshImages()" style="padding: 12px 20px; background: #7c3aed; border: none; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">🔄 Refresh Images</button>
+              <button onclick="showStatsModal()" style="padding: 12px 20px; background: #059669; border: none; color: white; border-radius: 6px; cursor: pointer; font-size: 14px;">📊 View Stats</button>
+            </div>
+          </div>
+          
+          <div id="admin-content" style="margin-top: 30px;">
+            <!-- Dynamic content will load here -->
+          </div>
+        </div>
+      </div>
     </div>
     
     <script>
+      // Admin mode protection
+      const ADMIN_PIN = '1453';
+      
+      function checkAdminMode() {
+        // Default to enabled if not set
+        const stored = localStorage.getItem('adminEnabled');
+        const isEnabled = stored === null ? true : stored === 'true';
+        
+        if (stored === null) {
+          localStorage.setItem('adminEnabled', 'true');
+        }
+        
+        if (isEnabled) {
+          document.body.classList.remove('admin-disabled');
+          const btn = document.getElementById('admin-lock-btn');
+          if (btn) {
+            btn.textContent = '🔓 Admin Enabled';
+            btn.classList.add('unlocked');
+          }
+        } else {
+          document.body.classList.add('admin-disabled');
+          const btn = document.getElementById('admin-lock-btn');
+          if (btn) {
+            btn.textContent = '🔒 Admin Locked';
+            btn.classList.remove('unlocked');
+          }
+        }
+        return isEnabled;
+      }
+      
+      function toggleAdminMode() {
+        const isCurrentlyEnabled = localStorage.getItem('adminEnabled') === 'true';
+        
+        if (isCurrentlyEnabled) {
+          // Disable admin mode
+          if (confirm('Lock admin mode? All edit controls will be hidden.')) {
+            localStorage.setItem('adminEnabled', 'false');
+            checkAdminMode();
+            // Refresh unallocated view to hide 0 quantity items
+            if (currentView === 'unallocated') {
+              renderUnallocatedView();
+            }
+            alert('🔒 Admin mode locked! Enter PIN 1453 to unlock.');
+          }
+        } else {
+          // Enable admin mode - require PIN
+          const pin = prompt('Enter PIN to unlock admin mode:');
+          if (pin === ADMIN_PIN) {
+            localStorage.setItem('adminEnabled', 'true');
+            checkAdminMode();
+            // Refresh unallocated view to show all items including 0 quantity
+            if (currentView === 'unallocated') {
+              renderUnallocatedView();
+            }
+            alert('🔓 Admin mode unlocked! All controls are now available.');
+          } else if (pin !== null) {
+            alert('❌ Incorrect PIN. Admin mode remains locked.');
+          }
+        }
+      }
+      
       let allocationsData = null;
       let currentView = 'overview';
       
@@ -604,9 +813,9 @@ class InventoryHandler(BaseHTTPRequestHandler):
                         <td><span class="price-badge">$${item.total_cost.toFixed(2)}</span></td>
                         <td style="color: #888; font-size: 12px;">${item.set_name || 'Other'}</td>
                         <td>
-                          <button class="edit-allocated-qty-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-owner="${owner}" data-item="${item.item_name}" data-qty="${item.allocated}" style="padding: 4px 8px; margin-right: 4px; background: #2563eb; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 11px;">Edit Qty</button>
-                          <button class="move-to-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-owner="${owner}" data-item="${item.item_name}" data-qty="${item.allocated}" style="padding: 4px 8px; margin-right: 4px; background: #ea580c; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 11px;">Move To</button>
-                          <button class="remove-allocation-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-owner="${owner}" data-item="${item.item_name}" style="padding: 4px 8px; background: #dc2626; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 11px;">Remove</button>
+                          <button class="edit-allocated-qty-btn admin-control" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-owner="${owner}" data-item="${item.item_name}" data-qty="${item.allocated}" style="padding: 4px 8px; margin-right: 4px; background: #2563eb; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 11px;">Edit Qty</button>
+                          <button class="move-to-btn admin-control" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-owner="${owner}" data-item="${item.item_name}" data-qty="${item.allocated}" style="padding: 4px 8px; margin-right: 4px; background: #ea580c; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 11px;">Move To</button>
+                          <button class="remove-allocation-btn admin-control" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-owner="${owner}" data-item="${item.item_name}" style="padding: 4px 8px; background: #dc2626; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 11px;">Remove</button>
                         </td>
                       </tr>
                     `).join('')}
@@ -627,8 +836,14 @@ class InventoryHandler(BaseHTTPRequestHandler):
       }
       
       function renderUnallocatedView() {
-        const items = allocationsData.unallocated_items;
+        let items = allocationsData.unallocated_items;
         const searchTerm = document.getElementById('search-unallocated')?.value.toLowerCase() || '';
+        
+        // Filter out 0 quantity items when admin is disabled
+        const isAdminEnabled = localStorage.getItem('adminEnabled') === 'true';
+        if (!isAdminEnabled) {
+          items = items.filter(item => item.quantity > 0);
+        }
         
         // Group by set
         const bySet = {};
@@ -678,19 +893,37 @@ class InventoryHandler(BaseHTTPRequestHandler):
                     ${items.sort((a, b) => b.quantity - a.quantity).map(item => `
                       <tr>
                         <td>
-                          ${item.image_url ? 
-                            `<img src="${item.image_url}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;" alt="${item.item_name}" />` : 
-                            '<div style="width: 60px; height: 60px; background: #2a2a2a; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666;">No Image</div>'
-                          }
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            <button onclick="showEditImageModal('${item.normalized_name || item.item_name.toLowerCase()}', '${item.item_name.replace(/'/g, "\\'")}', '${item.image_url || ''}')" 
+                              style="width: 28px; height: 28px; background: #7c3aed; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 14px; padding: 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                              🖼️
+                            </button>
+                            ${item.image_url ? 
+                              `<img src="${item.image_url}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;" alt="${item.item_name}" />` : 
+                              '<div style="width: 60px; height: 60px; background: #2a2a2a; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #666;">No Image</div>'
+                            }
+                          </div>
                         </td>
-                        <td>${item.item_name}</td>
-                        <td><span class="price-badge">$${(item.unit_cost || 0).toFixed(2)}</span></td>
+                        <td>
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="item-name-display">${item.item_name}</span>
+                            <button onclick="editItemName('${item.normalized_name || item.item_name.toLowerCase()}', '${item.item_name.replace(/'/g, "\\'")}')" 
+                              style="padding: 2px 6px; background: #444; border: none; color: white; border-radius: 3px; cursor: pointer; font-size: 11px;">✏️</button>
+                          </div>
+                        </td>
+                        <td>
+                          <div style="display: flex; align-items: center; gap: 8px;">
+                            <span class="price-badge">$${(item.unit_cost || 0).toFixed(2)}</span>
+                            <button onclick="editItemPrice('${item.normalized_name || item.item_name.toLowerCase()}', ${item.unit_cost || 0})" 
+                              style="padding: 2px 6px; background: #444; border: none; color: white; border-radius: 3px; cursor: pointer; font-size: 11px;">✏️</button>
+                          </div>
+                        </td>
                         <td><span class="qty-badge">${item.quantity}</span></td>
                         <td><span class="price-badge">$${((item.unit_cost || 0) * item.quantity).toFixed(2)}</span></td>
                         <td>
-                          <button class="edit-qty-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-item="${item.item_name}" data-qty="${item.quantity}" style="padding: 4px 8px; margin-right: 4px; background: #2563eb; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 12px;">Edit Qty</button>
-                          <button class="assign-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-item="${item.item_name}" data-qty="${item.quantity}" style="padding: 4px 8px; margin-right: 4px; background: #16a34a; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 12px;">Assign</button>
-                          <button class="delete-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-item="${item.item_name}" style="padding: 4px 8px; background: #dc2626; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 12px;">Delete</button>
+                          <button class="edit-qty-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-item="${item.item_name}" data-qty="${item.quantity}" style="padding: 6px 12px; margin-right: 4px; background: #2563eb; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">Qty</button>
+                          <button class="assign-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-item="${item.item_name}" data-qty="${item.quantity}" style="padding: 6px 12px; margin-right: 4px; background: #16a34a; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">Assign</button>
+                          <button class="delete-btn" data-normalized="${item.normalized_name || item.item_name.toLowerCase()}" data-item="${item.item_name}" style="padding: 6px 12px; background: #dc2626; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 500;">Delete</button>
                         </td>
                       </tr>
                     `).join('')}
@@ -987,7 +1220,227 @@ class InventoryHandler(BaseHTTPRequestHandler):
         }
       }
       
+      // ========== ADMIN PANEL FUNCTIONS ==========
+      
+      window.showAddItemModal = function() {
+        document.getElementById('addItemModal').classList.add('show');
+      };
+      
+      window.closeAddItemModal = function() {
+        document.getElementById('addItemModal').classList.remove('show');
+      };
+      
+      window.confirmAddItem = async function() {
+        const name = document.getElementById('new-item-name').value.trim();
+        const qty = parseInt(document.getElementById('new-item-qty').value);
+        const cost = parseFloat(document.getElementById('new-item-cost').value);
+        const set = document.getElementById('new-item-set').value.trim();
+        const image = document.getElementById('new-item-image').value.trim();
+        
+        if (!name) {
+          alert('Please enter an item name');
+          return;
+        }
+        
+        try {
+          const response = await fetch('/api/admin/add-item', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, quantity: qty, unit_cost: cost, set, image_url: image })
+          });
+          
+          if (response.ok) {
+            alert('Item added successfully!');
+            closeAddItemModal();
+            loadAllocations();
+            // Clear form
+            document.getElementById('new-item-name').value = '';
+            document.getElementById('new-item-qty').value = '1';
+            document.getElementById('new-item-cost').value = '0.00';
+            document.getElementById('new-item-set').value = '';
+            document.getElementById('new-item-image').value = '';
+          } else {
+            const error = await response.json();
+            alert('Failed to add item: ' + (error.message || 'Unknown error'));
+          }
+        } catch (error) {
+          alert('Error: ' + error.message);
+        }
+      };
+      
+      window.showBulkImageModal = function() {
+        alert('Bulk Image Upload: Coming soon! Use the folder /Users/sahcihansahin/Desktop/pokemon and one piece/Pokemon/Item Pics and the system will automatically detect images.');
+      };
+      
+      window.showEditImageModal = function(normalizedName, displayName, currentImageUrl) {
+        const modal = document.getElementById('editImageModal');
+        modal.dataset.normalizedName = normalizedName;
+        document.getElementById('edit-image-item-name').textContent = displayName;
+        document.getElementById('edit-image-url').value = currentImageUrl || '';
+        modal.classList.add('show');
+      };
+      
+      window.closeEditImageModal = function() {
+        document.getElementById('editImageModal').classList.remove('show');
+      };
+      
+      window.confirmEditImage = async function() {
+        const modal = document.getElementById('editImageModal');
+        const normalizedName = modal.dataset.normalizedName;
+        const imageUrl = document.getElementById('edit-image-url').value.trim();
+        
+        try {
+          const response = await fetch('/api/admin/update-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ normalized_name: normalizedName, image_url: imageUrl })
+          });
+          
+          if (response.ok) {
+            alert('Image updated successfully!');
+            closeEditImageModal();
+            loadAllocations();
+          } else {
+            const error = await response.json();
+            alert('Failed to update image: ' + (error.message || 'Unknown error'));
+          }
+        } catch (error) {
+          alert('Error: ' + error.message);
+        }
+      };
+      
+      window.showEditAllModal = async function() {
+        const modal = document.getElementById('editAllModal');
+        modal.classList.add('show');
+        
+        // Load all items
+        if (!allocationsData) return;
+        
+        const allItems = [
+          ...allocationsData.unallocated_items.map(i => ({...i, status: 'unallocated'})),
+          ...allocationsData.allocated_items.map(i => ({...i, status: 'allocated'}))
+        ];
+        
+        renderEditAllItems(allItems);
+        
+        // Setup search
+        document.getElementById('edit-all-search').oninput = function() {
+          const search = this.value.toLowerCase();
+          const filtered = allItems.filter(i => i.item_name.toLowerCase().includes(search));
+          renderEditAllItems(filtered);
+        };
+      };
+      
+      window.closeEditAllModal = function() {
+        document.getElementById('editAllModal').classList.remove('show');
+      };
+      
+      function renderEditAllItems(items) {
+        const container = document.getElementById('edit-all-items-list');
+        container.innerHTML = items.map(item => `
+          <div style="background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 15px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; gap: 15px;">
+              ${item.image_url ? 
+                `<img src="${item.image_url}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;">` :
+                '<div style="width: 50px; height: 50px; background: #2a2a2a; border-radius: 4px;"></div>'
+              }
+              <div style="flex: 1;">
+                <div style="font-weight: 600; margin-bottom: 5px;">${item.item_name}</div>
+                <div style="color: #888; font-size: 12px;">Qty: ${item.quantity || item.total_quantity} • Status: ${item.status}</div>
+              </div>
+              <button onclick="showEditImageModal('${item.normalized_name}', '${item.item_name.replace(/'/g, "\\'")}', '${item.image_url || ''}')" 
+                style="padding: 8px 16px; background: #2563eb; border: none; color: white; border-radius: 4px; cursor: pointer; font-size: 13px;">
+                🖼️ Edit Image
+              </button>
+            </div>
+          </div>
+        `).join('');
+      }
+      
+      window.exportDatabase = function() {
+        alert('Export functionality: Use the /data/inventory.db file directly or the checkpoint files for backups.');
+      };
+      
+      window.refreshImages = async function() {
+        alert('Refreshing image mappings...');
+        // Could implement an endpoint to re-scan the image folder
+      };
+      
+      window.showStatsModal = function() {
+        if (!allocationsData) return;
+        
+        const stats = `
+📊 INVENTORY STATISTICS
+
+Total Items: ${allocationsData.total_inventory}
+Allocated: ${allocationsData.total_allocated}
+Unallocated: ${allocationsData.total_unallocated}
+
+Owner Breakdown:
+${Object.entries(allocationsData.owner_totals).map(([owner, data]) => 
+  `• ${owner}: ${data.count} items ($${data.cost.toFixed(2)})`
+).join('\\n')}
+
+Products with Images: ${allocationsData.unallocated_items.filter(i => i.image_url).length + allocationsData.allocated_items.filter(i => i.image_url).length}
+        `.trim();
+        
+        alert(stats);
+      };
+      
+      window.editItemName = async function(normalizedName, currentName) {
+        const newName = prompt(`Edit item name:\\n\\nCurrent: ${currentName}\\nEnter new name:`, currentName);
+        if (!newName || newName === currentName) return;
+        
+        try {
+          const response = await fetch('/api/admin/update-name', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ normalized_name: normalizedName, new_name: newName })
+          });
+          
+          if (response.ok) {
+            alert('Name updated successfully!');
+            loadAllocations();
+          } else {
+            const error = await response.json();
+            alert('Failed to update name: ' + (error.message || 'Unknown error'));
+          }
+        } catch (error) {
+          alert('Error: ' + error.message);
+        }
+      };
+      
+      window.editItemPrice = async function(normalizedName, currentPrice) {
+        const newPrice = prompt(`Edit unit cost:\\n\\nCurrent: $${currentPrice.toFixed(2)}\\nEnter new price:`, currentPrice.toFixed(2));
+        if (!newPrice || parseFloat(newPrice) === currentPrice) return;
+        
+        const price = parseFloat(newPrice);
+        if (isNaN(price) || price < 0) {
+          alert('Please enter a valid price (0 or greater)');
+          return;
+        }
+        
+        try {
+          const response = await fetch('/api/admin/update-price', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ normalized_name: normalizedName, unit_cost: price })
+          });
+          
+          if (response.ok) {
+            alert('Price updated successfully!');
+            loadAllocations();
+          } else {
+            const error = await response.json();
+            alert('Failed to update price: ' + (error.message || 'Unknown error'));
+          }
+        } catch (error) {
+          alert('Error: ' + error.message);
+        }
+      };
+      
       // Load data on page load
+      checkAdminMode();
       loadAllocations();
     </script>
   </body>
@@ -1136,6 +1589,14 @@ class InventoryHandler(BaseHTTPRequestHandler):
             self._handle_move_allocation(data)
         elif path == "/api/remove-allocation":
             self._handle_remove_allocation(data)
+        elif path == "/api/admin/add-item":
+            self._handle_admin_add_item(data)
+        elif path == "/api/admin/update-image":
+            self._handle_admin_update_image(data)
+        elif path == "/api/admin/update-name":
+            self._handle_admin_update_name(data)
+        elif path == "/api/admin/update-price":
+            self._handle_admin_update_price(data)
         else:
             self.send_error(404)
     
@@ -1449,6 +1910,215 @@ class InventoryHandler(BaseHTTPRequestHandler):
             
         except Exception as e:
             self.send_error(500, f"Error removing allocation: {str(e)}")
+    
+    def _handle_admin_add_item(self, data: dict) -> None:
+        """Add a new item to inventory."""
+        name = data.get('name')
+        quantity = data.get('quantity', 1)
+        unit_cost = data.get('unit_cost', 0.0)
+        set_name = data.get('set', 'Other')
+        image_url = data.get('image_url')
+        
+        if not name:
+            self.send_error(400, "Missing item name")
+            return
+        
+        try:
+            from pathlib import Path
+            from app.models import Transaction, ProductImage
+            from app.services.reporting import normalize_title
+            from decimal import Decimal
+            import uuid
+            
+            db_path = Path("data/inventory.db")
+            engine = get_engine(f"sqlite+pysqlite:///{db_path}")
+            session_factory = get_session_factory(engine)
+            
+            with session_factory() as session:
+                # Normalize the item name
+                normalized_name = normalize_title(name.lower(), "custom")
+                
+                # Create a new transaction entry
+                new_transaction = Transaction(
+                    order_id=f"MANUAL-{uuid.uuid4().hex[:8]}",
+                    listing_title=name,
+                    buyer_name="MANUAL_ENTRY",
+                    quantity_sold=quantity,
+                    order_earnings=Decimal(str(unit_cost * quantity)),
+                    source_file="MANUAL",
+                    is_sale=True
+                )
+                session.add(new_transaction)
+                
+                # Check if ProductImage exists for this item
+                product_image = session.execute(
+                    select(ProductImage)
+                    .where(ProductImage.normalized_item_name == normalized_name)
+                ).scalar_one_or_none()
+                
+                if product_image:
+                    # Update existing
+                    product_image.unit_cost = Decimal(str(unit_cost))
+                    if image_url:
+                        product_image.image_url = image_url
+                    if not product_image.description:
+                        product_image.description = name
+                else:
+                    # Create new ProductImage entry
+                    new_image = ProductImage(
+                        normalized_item_name=normalized_name,
+                        description=name,
+                        image_url=image_url,
+                        unit_cost=Decimal(str(unit_cost))
+                    )
+                    session.add(new_image)
+                
+                session.commit()
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success", "message": f"Added {quantity} × '{name}'"}).encode("utf-8"))
+            
+        except Exception as e:
+            self.send_error(500, f"Error adding item: {str(e)}")
+    
+    def _handle_admin_update_image(self, data: dict) -> None:
+        """Update the image for an item."""
+        normalized_name = data.get('normalized_name')
+        image_url = data.get('image_url')
+        
+        if not normalized_name:
+            self.send_error(400, "Missing normalized_name")
+            return
+        
+        try:
+            from pathlib import Path
+            from app.models import ProductImage
+            from decimal import Decimal
+            
+            db_path = Path("data/inventory.db")
+            engine = get_engine(f"sqlite+pysqlite:///{db_path}")
+            session_factory = get_session_factory(engine)
+            
+            with session_factory() as session:
+                # Get or create ProductImage
+                product_image = session.execute(
+                    select(ProductImage)
+                    .where(ProductImage.normalized_item_name == normalized_name)
+                ).scalar_one_or_none()
+                
+                if product_image:
+                    product_image.image_url = image_url if image_url else None
+                else:
+                    # Create new if doesn't exist
+                    new_image = ProductImage(
+                        normalized_item_name=normalized_name,
+                        image_url=image_url,
+                        unit_cost=Decimal("0.00")
+                    )
+                    session.add(new_image)
+                
+                session.commit()
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success"}).encode("utf-8"))
+            
+        except Exception as e:
+            self.send_error(500, f"Error updating image: {str(e)}")
+    
+    def _handle_admin_update_name(self, data: dict) -> None:
+        """Update the display name for an item."""
+        normalized_name = data.get('normalized_name')
+        new_name = data.get('new_name')
+        
+        if not normalized_name or not new_name:
+            self.send_error(400, "Missing normalized_name or new_name")
+            return
+        
+        try:
+            from pathlib import Path
+            from app.models import ProductImage
+            from decimal import Decimal
+            
+            db_path = Path("data/inventory.db")
+            engine = get_engine(f"sqlite+pysqlite:///{db_path}")
+            session_factory = get_session_factory(engine)
+            
+            with session_factory() as session:
+                # Get or create ProductImage
+                product_image = session.execute(
+                    select(ProductImage)
+                    .where(ProductImage.normalized_item_name == normalized_name)
+                ).scalar_one_or_none()
+                
+                if product_image:
+                    product_image.description = new_name
+                else:
+                    # Create new if doesn't exist
+                    new_image = ProductImage(
+                        normalized_item_name=normalized_name,
+                        description=new_name,
+                        unit_cost=Decimal("0.00")
+                    )
+                    session.add(new_image)
+                
+                session.commit()
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success"}).encode("utf-8"))
+            
+        except Exception as e:
+            self.send_error(500, f"Error updating name: {str(e)}")
+    
+    def _handle_admin_update_price(self, data: dict) -> None:
+        """Update the unit cost for an item."""
+        normalized_name = data.get('normalized_name')
+        unit_cost = data.get('unit_cost')
+        
+        if not normalized_name or unit_cost is None:
+            self.send_error(400, "Missing normalized_name or unit_cost")
+            return
+        
+        try:
+            from pathlib import Path
+            from app.models import ProductImage
+            from decimal import Decimal
+            
+            db_path = Path("data/inventory.db")
+            engine = get_engine(f"sqlite+pysqlite:///{db_path}")
+            session_factory = get_session_factory(engine)
+            
+            with session_factory() as session:
+                # Get or create ProductImage
+                product_image = session.execute(
+                    select(ProductImage)
+                    .where(ProductImage.normalized_item_name == normalized_name)
+                ).scalar_one_or_none()
+                
+                if product_image:
+                    product_image.unit_cost = Decimal(str(unit_cost))
+                else:
+                    # Create new if doesn't exist
+                    new_image = ProductImage(
+                        normalized_item_name=normalized_name,
+                        unit_cost=Decimal(str(unit_cost))
+                    )
+                    session.add(new_image)
+                
+                session.commit()
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "success"}).encode("utf-8"))
+            
+        except Exception as e:
+            self.send_error(500, f"Error updating price: {str(e)}")
 
 
 def main() -> None:
