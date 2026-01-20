@@ -2125,9 +2125,33 @@ def main() -> None:
     """
     Start the local UI server.
     """
-    port = 5173
-    server = ThreadingHTTPServer(("127.0.0.1", port), InventoryHandler)
-    print(f"Inventory dashboard running at http://127.0.0.1:{port}")
+    import os
+    from app.db import create_db_and_tables, get_engine
+    
+    # Ensure data directory exists (Railway doesn't have it by default)
+    data_dir = Path("data")
+    data_dir.mkdir(exist_ok=True)
+    print(f"✅ Data directory: {data_dir.absolute()}")
+    
+    # Initialize database if it doesn't exist
+    db_path = Path("data/inventory.db")
+    if not db_path.exists():
+        print("🔧 Creating fresh database...")
+        engine = get_engine(f"sqlite+pysqlite:///{db_path}")
+        create_db_and_tables(engine)
+        print("✅ Database created")
+    else:
+        print(f"✅ Database found: {db_path}")
+    
+    # Use PORT from environment (Railway) or default to 5173 (local)
+    port = int(os.environ.get("PORT", 5173))
+    
+    # Bind to 0.0.0.0 for Railway, allows external access
+    host = "0.0.0.0" if os.environ.get("RAILWAY_ENVIRONMENT") else "127.0.0.1"
+    
+    print(f"🚀 Starting server on {host}:{port}")
+    server = ThreadingHTTPServer((host, port), InventoryHandler)
+    print(f"✅ Inventory dashboard running at http://{host}:{port}")
     print("Press Ctrl+C to stop")
     try:
         server.serve_forever()
